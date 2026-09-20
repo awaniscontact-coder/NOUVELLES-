@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const execFileAsync = promisify(execFile);
 
@@ -19,6 +22,13 @@ function safeUrl(value) {
   }
 }
 
+function findDownloadedFile(directory) {
+  return readdir(directory, { withFileTypes: true }).then((entries) => {
+    const file = entries.find((entry) => entry.isFile() && !entry.name.endsWith(".part") && !entry.name.endsWith(".ytdl"));
+    return file ? path.join(directory, file.name) : null;
+  });
+}
+
 export async function POST(request) {
   let directory;
   try {
@@ -30,29 +40,34 @@ export async function POST(request) {
     const format = /^[a-zA-Z0-9+./_-]{1,80}$/.test(requestedFormat) ? requestedFormat : "best";
     directory = await mkdtemp(path.join(tmpdir(), "video-downloader-"));
     const output = path.join(directory, "download.%(ext)s");
+    const executable = process.env.YTDLP_BIN || "yt-dlp";
+    const selectedFormat = format === "best" ? "bestvideo*+bestaudio/best" : format;
 
     await execFileAsync(
-      process.env.YTDLP_BIN || "yt-dlp",
-      ["--no-playlist", "--restrict-filenames", "-f", format === "best" ? "bv*+ba/b" : format, "--merge-output-format", "mp4", "-o", output, url],
-      { timeout: 10 * 60 * 1000, maxBuffer: 2 * 1024 * 1024 }
+      executable,
+      ["--no-playlist", "--restrict-filenames", "--no-part", "-f", selectedFormat, "--merge-output-format", "mp4", "-o", output, url],
+      { timeout: 10 * 60 * 1000, maxBuffer: 4 * 1024 * 1024, windowsHide: true }
     );
 
-    const { stdout } = await execFileAsync("find", [directory, "-maxdepth", "1", "-type", "f", "-print"], { timeout: 5000 });
-    const file = stdout.trim().split("\n").find(Boolean);
-    if (!file) throw new Error("Fichier absent");
+    const file = await findDownloadedFile(directory);
+    if (!file) throw new Error("Le fichier téléchargé est introuvable.");
     const data = await readFile(file);
-    const filename = path.basename(file).replace(/^download\./, "video.");
+    const extension = path.extname(file).toLowerCase();
+    const contentType = extension === ".mp4" ? "video/mp4" : extension === ".webm" ? "video/webm" : extension === ".m4a" ? "audio/mp4" : "application/octet-stream";
 
     return new NextResponse(data, {
       headers: {
-        "Content-Type": filename.endsWith(".mp4") ? "video/mp4" : "application/octet-stream",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Type": contentType,
+        "Content-Disposition": `attachment; filename="video${extension || ".mp4"}"`,
         "Content-Length": String(data.length),
         "Cache-Control": "no-store"
       }
     });
   } catch (error) {
-    return NextResponse.json({ error: "Le téléchargement a échoué. Vérifiez que la vidéo est accessible et autorisée." }, { status: 500 });
+    const message = error?.code === "ENOENT"
+      ? "yt-dlp est introuvable. Vérifiez qu’il est installé et disponible dans le PATH."
+      : "Le téléchargement a échoué. Vérifiez que la vidéo est accessible, autorisée et que le lien est valide.";
+    return NextResponse.json({ error: message }, { status: 500 });
   } finally {
     if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {});
   }
