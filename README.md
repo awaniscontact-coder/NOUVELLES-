@@ -1,30 +1,41 @@
-# Téléchargeur vidéo par lien
+# Téléchargeur vidéo YouTube et TikTok
 
-Application web Next.js permettant de récupérer les métadonnées et de télécharger des contenus vidéo accessibles par URL avec [`yt-dlp`](https://github.com/yt-dlp/yt-dlp).
+Application web Next.js permettant de récupérer les métadonnées et de télécharger des contenus publics YouTube et TikTok avec [`yt-dlp`](https://github.com/yt-dlp/yt-dlp).
 
-## Utilisation locale
+## Utilisation locale sous Windows
 
-Prérequis : Node.js 18+ et `yt-dlp` installés et disponibles dans le `PATH`.
+Prérequis : Node.js 18+, `yt-dlp` et `ffmpeg` installés et disponibles dans le PATH.
 
-```bash
+```powershell
 npm install
 npm run dev
 ```
 
 Ouvrir ensuite http://localhost:3000.
 
-### Installation de yt-dlp
+Vérifier les outils :
 
-- macOS : `brew install yt-dlp ffmpeg`
-- Debian/Ubuntu : `sudo apt install yt-dlp ffmpeg`
-- Windows : installer `yt-dlp.exe` et `ffmpeg`, puis les ajouter au `PATH`
+```powershell
+yt-dlp --version
+ffmpeg -version
+```
 
-`ffmpeg` est nécessaire pour fusionner certaines pistes vidéo et audio.
+Tester un lien avant d’utiliser le site :
 
-## Déploiement
+```powershell
+yt-dlp -F "https://www.youtube.com/watch?v=IDENTIFIANT"
+yt-dlp -F "https://www.tiktok.com/@compte/video/IDENTIFIANT"
+```
 
-Le serveur doit disposer de `yt-dlp`, de `ffmpeg`, d'un espace temporaire accessible en écriture et d'un timeout adapté. Un hébergement serverless avec des fonctions courtes n'est généralement pas adapté aux gros fichiers.
+## Limites importantes
 
-## Utilisation responsable
+- Les vidéos doivent être publiques et accessibles sans DRM, paywall ou contournement de protection.
+- YouTube et TikTok peuvent modifier leur fonctionnement ou bloquer temporairement les requêtes.
+- Les liens privés, supprimés, soumis à une restriction d’âge/compte, protégés par DRM ou bloqués par la plateforme peuvent échouer.
+- Mettez régulièrement `yt-dlp` à jour :
 
-Utilisez uniquement des vidéos que vous possédez ou que vous êtes autorisé à télécharger. Cette application ne contourne pas les DRM, les paywalls ou les contrôles d'accès. Respectez les conditions d'utilisation des plateformes et les droits d'auteur.
+```powershell
+yt-dlp -U
+```
+
+Utilisez uniquement des vidéos que vous possédez ou que vous êtes autorisé à télécharger. Respectez les conditions d’utilisation des plateformes et les droits d’auteur.
