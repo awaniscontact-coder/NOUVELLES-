@@ -3,6 +3,20 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const supportedHosts = [
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "youtu.be",
+  "www.youtu.be",
+  "youtube-nocookie.com",
+  "www.youtube-nocookie.com",
+  "tiktok.com",
+  "www.tiktok.com",
+  "m.tiktok.com",
+  "vm.tiktok.com",
+  "vt.tiktok.com"
+];
 
 function validateUrl(value) {
   let url;
@@ -22,7 +36,30 @@ function validateUrl(value) {
     return { error: "Cette adresse n’est pas autorisée." };
   }
 
-  return { url: url.toString() };
+  const isSupported = supportedHosts.some((domain) => host === domain || host.endsWith(`.${domain}`));
+  if (!isSupported) {
+    return { error: "Cette plateforme n’est pas supportée. Le site doit être YouTube ou TikTok, ou un lien direct de fichier vidéo public." };
+  }
+
+  return {
+    url: url.toString(),
+    platform: host.includes("tiktok") ? "TikTok" : "YouTube"
+  };
+}
+
+function normalizeFormats(info) {
+  const items = (info?.formats || [])
+    .filter((format) => format?.ext && ["mp4", "webm", "m4a", "mp3"].includes(format.ext))
+    .filter((format) => format.vcodec !== "none" || format.acodec !== "none")
+    .slice(-18)
+    .map((format) => ({
+      format_id: format.format_id,
+      ext: format.ext,
+      resolution: format.resolution || format.format_note || "Audio/vidéo",
+      filesize: format.filesize || format.filesize_approx || null
+    }));
+
+  return items;
 }
 
 export async function POST(request) {
@@ -33,30 +70,39 @@ export async function POST(request) {
 
     const { stdout } = await execFileAsync(
       process.env.YTDLP_BIN || "yt-dlp",
-      ["--dump-single-json", "--no-playlist", "--skip-download", checked.url],
-      { timeout: 30000, maxBuffer: 2 * 1024 * 1024 }
+      [
+        "--dump-single-json",
+        "--no-playlist",
+        "--skip-download",
+        "--no-warnings",
+        "--extractor-args",
+        "youtube:player_client=web,android,default",
+        checked.url
+      ],
+      { timeout: 60000, maxBuffer: 5 * 1024 * 1024, windowsHide: true }
     );
-    const info = JSON.parse(stdout);
+
+    const text = stdout.trim();
+    if (!text) {
+      throw new Error("Aucune donnée n’a été renvoyée par yt-dlp.");
+    }
+
+    const info = JSON.parse(text);
 
     return NextResponse.json({
+      platform: checked.platform || info.extractor_key || "Plateforme supportée",
       title: info.title || "Vidéo sans titre",
-      thumbnail: info.thumbnail || null,
+      thumbnail: info.thumbnail || info.thumbnails?.[0]?.url || null,
       duration: info.duration || null,
       uploader: info.uploader || info.channel || null,
-      formats: (info.formats || [])
-        .filter((format) => format.ext && ["mp4", "webm", "m4a", "mp3"].includes(format.ext))
-        .slice(-12)
-        .map((format) => ({
-          format_id: format.format_id,
-          ext: format.ext,
-          resolution: format.resolution || format.format_note || "Audio/vidéo",
-          filesize: format.filesize || format.filesize_approx || null
-        }))
+      formats: normalizeFormats(info)
     });
   } catch (error) {
-    const message = error?.code === "ENOENT"
-      ? "yt-dlp n’est pas installé sur le serveur. Consultez le README."
-      : "Impossible de lire cette URL. Vérifiez le lien et vos autorisations.";
+    const message =
+      error?.code === "ENOENT"
+        ? "yt-dlp n’est pas installé ou n’est pas accessible dans le PATH."
+        : "Le lien n’a pas pu être lu. Vérifiez qu’il s’agit d’une vidéo publique YouTube/TikTok valide, non privée, non protégée et autorisée au téléchargement.";
+
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
